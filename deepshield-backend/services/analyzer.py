@@ -1,0 +1,153 @@
+import asyncio
+
+from services.bitmind import (
+    analyze_image,
+    analyze_video,
+)
+
+from services.reality_defender import (
+    analyze_audio,
+)
+
+
+def get_risk_level(score: float) -> str:
+    if score < 30:
+        return "LOW"
+
+    if score < 70:
+        return "MEDIUM"
+
+    return "HIGH"
+
+
+def normalize_bitmind(
+    result: dict,
+    media_type: str,
+) -> dict:
+
+    is_ai = bool(result.get("isAI", False))
+    confidence = float(result.get("confidence", 0))
+
+    if is_ai:
+        risk_score = confidence * 100
+        prediction = "LIKELY_AI_GENERATED"
+        detection_status = "AI-generated content detected"
+    else:
+        risk_score = (1 - confidence) * 100
+        prediction = "LIKELY_AUTHENTIC"
+        detection_status = "No strong AI-generation signal detected"
+
+    return {
+        "success": True,
+        "media_type": media_type,
+        "prediction": prediction,
+        "risk_score": round(risk_score, 1),
+        "risk_level": get_risk_level(risk_score),
+        "confidence": round(confidence * 100, 1),
+        "provider": "BitMind",
+
+        "signals": [
+            {
+                "name": "AI Generation Detection",
+                "value": detection_status,
+                "score": round(confidence * 100, 1),
+            }
+        ],
+    }
+
+
+def normalize_reality_defender(result: dict) -> dict:
+
+    status = result.get("status", "UNKNOWN")
+    score = float(result.get("score", 0))
+
+    risk_score = score * 100
+
+    if status == "MANIPULATED":
+        prediction = "LIKELY_MANIPULATED"
+
+    elif status == "AUTHENTIC":
+        prediction = "LIKELY_AUTHENTIC"
+
+    else:
+        prediction = "INCONCLUSIVE"
+
+    signals = []
+
+    for model in result.get("models", []):
+        signals.append(
+            {
+                "name": model.get(
+                    "name",
+                    "Audio Detection Model",
+                ),
+
+                "value": model.get(
+                    "status",
+                    "UNKNOWN",
+                ),
+
+                "score": round(
+                    float(model.get("score", 0)) * 100,
+                    1,
+                ),
+            }
+        )
+
+    return {
+        "success": True,
+        "media_type": "audio",
+        "prediction": prediction,
+        "risk_score": round(risk_score, 1),
+        "risk_level": get_risk_level(risk_score),
+        "confidence": round(risk_score, 1),
+        "provider": "Reality Defender",
+        "signals": signals,
+    }
+
+
+async def analyze_file(
+    file_path: str,
+    filename: str,
+    media_type: str,
+) -> dict:
+
+    if media_type == "image":
+
+        result = await asyncio.to_thread(
+            analyze_image,
+            file_path,
+            filename,
+        )
+
+        return normalize_bitmind(
+            result,
+            "image",
+        )
+
+    if media_type == "video":
+
+        result = await asyncio.to_thread(
+            analyze_video,
+            file_path,
+            filename,
+        )
+
+        return normalize_bitmind(
+            result,
+            "video",
+        )
+
+    if media_type == "audio":
+
+        result = await analyze_audio(
+            file_path
+        )
+
+        return normalize_reality_defender(
+            result
+        )
+
+    raise ValueError(
+        "Unsupported media type"
+    )
