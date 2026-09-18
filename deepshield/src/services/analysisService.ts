@@ -1,10 +1,11 @@
 import { AnalysisResult } from '../types/analysis';
 
 // Backend endpoint, overridable per environment via VITE_BACKEND_URL.
-// Defaults to the local dev server so `npm run dev` works out of the box.
+// Default '' = same origin: `npm start` (server.js) runs the FastAPI
+// backend behind this app and proxies /analyze. For frontend-only dev
+// (`npm run dev`), set VITE_BACKEND_URL=http://127.0.0.1:8000 in .env.local.
 const BACKEND_BASE =
-  (import.meta.env.VITE_BACKEND_URL as string | undefined) ??
-  'http://127.0.0.1:8000';
+  (import.meta.env.VITE_BACKEND_URL as string | undefined) ?? '';
 
 const BACKEND_URL = BACKEND_BASE.replace(/\/$/, '') + '/analyze';
 
