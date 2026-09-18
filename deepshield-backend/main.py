@@ -22,19 +22,29 @@ from services.analyzer import analyze_file
 
 app = FastAPI(
     title="DeepShield API",
-    version="1.0.0",
+    version="1.0.1",
 )
 
+
+# CORS: configurable via CORS_ORIGINS (comma-separated). Falls back to
+# sensible local-development defaults when unset.
+_cors_origins = os.getenv("CORS_ORIGINS", "")
+
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in _cors_origins.split(",")
+    if origin.strip()
+] or [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
 
 app.add_middleware(
     CORSMiddleware,
 
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=ALLOWED_ORIGINS,
 
     allow_credentials=True,
 
@@ -42,6 +52,12 @@ app.add_middleware(
 
     allow_headers=["*"],
 )
+
+
+# Upload size cap (bytes). Prevents huge payloads from eating memory and
+# provider bandwidth before any analysis starts.
+MAX_UPLOAD_MB = float(os.getenv("MAX_UPLOAD_MB", "100"))
+MAX_UPLOAD_BYTES = int(MAX_UPLOAD_MB * 1024 * 1024)
 
 
 @app.get("/")
@@ -85,9 +101,10 @@ async def analyze(
 
     start_time = time.time()
 
-    suffix = os.path.splitext(
-        file.filename
-    )[1]
+    # Keep only a short, safe extension for the temp file so odd or
+    # malicious filenames can never escape the temp directory.
+    raw_suffix = os.path.splitext(file.filename)[1]
+    suffix = raw_suffix if 0 < len(raw_suffix) <= 10 else ".bin"
 
     temp_path = None
 
@@ -100,10 +117,26 @@ async def analyze(
 
             temp_path = temp_file.name
 
-            shutil.copyfileobj(
-                file.file,
-                temp_file,
-            )
+            bytes_written = 0
+
+            while True:
+                chunk = await file.read(1024 * 1024)
+
+                if not chunk:
+                    break
+
+                bytes_written += len(chunk)
+
+                if bytes_written > MAX_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=(
+                            f"File too large. Maximum is "
+                            f"{MAX_UPLOAD_MB:g} MB."
+                        ),
+                    )
+
+                temp_file.write(chunk)
 
         result = await analyze_file(
             file_path=temp_path,
@@ -123,6 +156,12 @@ async def analyze(
         )
 
         return result
+
+    except HTTPException:
+
+        # Client errors (4xx) must reach the browser as-is, not be
+        # repackaged as a generic 500.
+        raise
 
     except Exception as error:
 

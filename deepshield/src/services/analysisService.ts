@@ -1,11 +1,25 @@
 import { AnalysisResult } from '../types/analysis';
 
-const BACKEND_URL = 'http://127.0.0.1:8000/analyze';
+// Backend endpoint, overridable per environment via VITE_BACKEND_URL.
+// Defaults to the local dev server so `npm run dev` works out of the box.
+const BACKEND_BASE =
+  (import.meta.env.VITE_BACKEND_URL as string | undefined) ??
+  'http://127.0.0.1:8000';
+
+const BACKEND_URL = BACKEND_BASE.replace(/\/$/, '') + '/analyze';
+
+// Hard cap on a single analysis request (video can legitimately take a
+// while, but the UI should never hang forever on a dead server).
+const REQUEST_TIMEOUT_MS = 330_000;
 
 function getRecommendation(
   riskScore: number,
   prediction: string
 ): string {
+  if (prediction === 'INCONCLUSIVE') {
+    return 'The analysis was inconclusive. Treat this media as unverified and confirm its authenticity with the original source before relying on it.';
+  }
+
   if (
     prediction === 'LIKELY_MANIPULATED' ||
     prediction === 'LIKELY_AI_GENERATED' ||
@@ -47,19 +61,34 @@ export async function analyzeMedia(
   const formData = new FormData();
   formData.append('file', file);
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    REQUEST_TIMEOUT_MS
+  );
+
   let response: Response;
 
   try {
     response = await fetch(BACKEND_URL, {
       method: 'POST',
       body: formData,
+      signal: controller.signal,
     });
   } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error(
+        'The analysis took too long and was cancelled. Please try again with a smaller file.'
+      );
+    }
+
     console.error('Network error:', error);
 
     throw new Error(
-      'Unable to reach the DeepShield analysis server. Please ensure the backend is running on port 8000.'
+      'Unable to reach the DeepShield analysis server. Please ensure the backend is running and VITE_BACKEND_URL is configured.'
     );
+  } finally {
+    clearTimeout(timeoutId);
   }
 
   let data: any;
@@ -73,6 +102,10 @@ export async function analyzeMedia(
   }
 
   if (!response.ok) {
+    if (response.status === 413) {
+      throw new Error(data.detail || 'The file is too large to analyze.');
+    }
+
     throw new Error(
       data.detail ||
       `Analysis failed with status ${response.status}.`
@@ -121,7 +154,7 @@ export async function analyzeMedia(
           value:
           typeof signal.score === 'number'
         ? `${signal.value || 'UNKNOWN'} • ${signal.score.toFixed(1)}%`
-        : signal.value || 'UNKNOWN',
+        : signal.value || 'NO SCORE',
 
         description: getSignalDescription(
           signal,
