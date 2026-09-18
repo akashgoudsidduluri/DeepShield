@@ -24,8 +24,15 @@ import { spawn } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
+import dotenv from 'dotenv';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Load the workspace .env (repo root) into process.env BEFORE spawning the
+// backend, so BITMIND_API_KEY / REALITY_DEFENDER_API_KEY always reach the
+// uvicorn child regardless of how the preview platform injects env.
+// Does not override variables that are already set.
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 const PORT = Number(process.env.PORT || 3000);
 const BACKEND_PORT = Number(process.env.BACKEND_PORT || 8901);

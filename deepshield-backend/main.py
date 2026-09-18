@@ -2,10 +2,16 @@ import os
 import shutil
 import tempfile
 import time
+from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()
+# Load .env from the backend dir, then the repo root as fallback, so the
+# app works whether keys live next to main.py or in the workspace root
+# (e.g. the Freebuff workspace .env). Already-set vars are not overridden.
+_BACKEND_DIR = Path(__file__).resolve().parent
+load_dotenv(_BACKEND_DIR / ".env")
+load_dotenv(_BACKEND_DIR.parent / ".env")
 
 from fastapi import (
     FastAPI,
