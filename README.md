@@ -40,7 +40,7 @@ DeepShield answers one question: **can this media be trusted?**
 ┌───────────────────────────── Freebuff / one port ─────────────────────────────┐
 │                                                                              │
 │  Browser ──► server.js (Express, PORT)                                       │
-│                │  /analyze, /api/*  ──► proxy ──► FastAPI (uvicorn :8001)    │
+│                │  /analyze, /api/*  ──► proxy ──► FastAPI (uvicorn :8901)    │
 │                │                                       │   deepshield-       │
 │                └─ /  ──► Vite middleware               │   backend/main.py   │
 │                   (React + Tailwind SPA)               │        │            │

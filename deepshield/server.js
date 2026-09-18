@@ -8,8 +8,14 @@
  *
  * Env:
  *   PORT          port to listen on (default 3000; Freebuff injects this)
- *   BACKEND_PORT  internal port for uvicorn (default 8001)
+ *   BACKEND_PORT  internal port for uvicorn (default 8901, uncommon on purpose
+ *                 so platform port probes never mistake the backend for the app)
  *   PYTHON        python binary (default python3)
+ *
+ * Boot order matters: Express binds $PORT immediately, then waits for the
+ * backend in the background. If we waited for uvicorn first, the preview
+ * platform's readiness probe would find uvicorn on a common port instead
+ * and map the public URL to the raw API.
  */
 
 import express from 'express';
@@ -22,7 +28,7 @@ import { createServer as createViteServer } from 'vite';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const PORT = Number(process.env.PORT || 3000);
-const BACKEND_PORT = Number(process.env.BACKEND_PORT || 8001);
+const BACKEND_PORT = Number(process.env.BACKEND_PORT || 8901);
 const PYTHON = process.env.PYTHON || 'python3';
 const BACKEND_DIR = path.resolve(__dirname, '../deepshield-backend');
 
@@ -142,23 +148,24 @@ const vite = await createViteServer({
 app.use(vite.middlewares);
 
 // ---------------------------------------------------------------------------
-// 4. Boot
+// 4. Boot — bind $PORT first, backend readiness is checked in background
 // ---------------------------------------------------------------------------
-
-try {
-  await waitForBackend();
-  console.log(`[server] backend healthy on 127.0.0.1:${BACKEND_PORT}`);
-} catch (err) {
-  console.error('[server]', err.message);
-  console.error(
-    '[server] continuing without backend — the UI will load but ' +
-    'analysis requests will fail until the backend is up.'
-  );
-}
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`[server] DeepShield listening on http://0.0.0.0:${PORT}`);
 });
+
+waitForBackend()
+  .then(() => {
+    console.log(`[server] backend healthy on 127.0.0.1:${BACKEND_PORT}`);
+  })
+  .catch((err) => {
+    console.error('[server]', err.message);
+    console.error(
+      '[server] continuing without backend — the UI will load but ' +
+      'analysis requests will fail until the backend is up.'
+    );
+  });
 
 // Forward shutdown signals so uvicorn dies with us.
 for (const signal of ['SIGINT', 'SIGTERM']) {
