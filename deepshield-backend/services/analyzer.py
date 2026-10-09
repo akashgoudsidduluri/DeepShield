@@ -1,6 +1,9 @@
 import asyncio
 
+from fastapi import HTTPException
+
 from services.bitmind import (
+    ProviderError,
     analyze_image,
     analyze_video,
 )
@@ -122,6 +125,30 @@ def normalize_reality_defender(result: dict) -> dict:
     }
 
 
+def _provider_error_to_http(
+    error: ProviderError,
+) -> HTTPException:
+    """Convert a sanitized BitMind provider error into a safe FastAPI response.
+
+    Provider 4xx failures are surfaced to the frontend as HTTP 424
+    (Failed Dependency), which is semantically appropriate for a dependent
+    external service being unavailable or rejecting the request. The response
+    body intentionally omits the API key, the uploaded media bytes, and any
+    raw traceback.
+    """
+    return HTTPException(
+        status_code=424,
+        detail={
+            "provider": "BitMind",
+            "provider_status": error.status_code,
+            "file": error.file,
+            "message": "The external analysis provider rejected or failed the request. "
+            "The request is safe to retry. If the problem persists, verify the "
+            "uploaded file meets the provider's limits.",
+        },
+    )
+
+
 async def analyze_file(
     file_path: str,
     filename: str,
@@ -130,11 +157,14 @@ async def analyze_file(
 
     if media_type == "image":
 
-        result = await asyncio.to_thread(
-            analyze_image,
-            file_path,
-            filename,
-        )
+        try:
+            result = await asyncio.to_thread(
+                analyze_image,
+                file_path,
+                filename,
+            )
+        except ProviderError as error:
+            raise _provider_error_to_http(error) from error
 
         return normalize_bitmind(
             result,
@@ -143,11 +173,14 @@ async def analyze_file(
 
     if media_type == "video":
 
-        result = await asyncio.to_thread(
-            analyze_video,
-            file_path,
-            filename,
-        )
+        try:
+            result = await asyncio.to_thread(
+                analyze_video,
+                file_path,
+                filename,
+            )
+        except ProviderError as error:
+            raise _provider_error_to_http(error) from error
 
         return normalize_bitmind(
             result,

@@ -171,17 +171,23 @@ async def analyze(
 
     except Exception as error:
 
-        print(
-            "ANALYSIS ERROR:",
-            repr(error),
+        # The most likely visible failure right now is a BitMind provider 400,
+        # which we convert to a sanitized HTTP 424 in services.analyzer.
+        # Catch-all here is for anything else (runtime, IO, etc.).
+
+        import logging as _logging
+
+        _logging.getLogger(__name__).exception(
+            "analysis request failed for %s",
+            getattr(file, "filename", "unknown"),
         )
 
         raise HTTPException(
             status_code=500,
             detail=(
-                f"Analysis failed: {str(error)}"
+                "Analysis failed. Please try again later."
             ),
-        )
+        ) from error
 
     finally:
 
