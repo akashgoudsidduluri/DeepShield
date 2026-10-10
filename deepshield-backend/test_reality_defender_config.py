@@ -5,15 +5,24 @@ from services.reality_defender import load_polling_config
 
 
 class TestPollingConfigDefaults:
-    def test_defaults_preserve_existing_app_behavior(self, monkeypatch):
+    def test_defaults_use_1000ms_and_preserve_five_minute_window(self, monkeypatch):
         monkeypatch.delenv("RD_POLL_INTERVAL_MS", raising=False)
         monkeypatch.delenv("RD_POLL_MAX_ATTEMPTS", raising=False)
 
         config = load_polling_config()
-        assert config["polling_interval_ms"] == 2000
-        # The app intentionally preserves its existing 150-attempt window
-        # (the SDK default of 30 would abandon longer valid scans).
-        assert config["max_attempts"] == 150
+        # Measured optimization: 1000ms interval (was 2000ms) cuts median
+        # end-to-end audio latency while keeping the same deadline.
+        assert config["polling_interval_ms"] == 1000
+        assert config["max_attempts"] == 300
+
+    def test_default_poll_window_is_at_least_five_minutes(self, monkeypatch):
+        monkeypatch.delenv("RD_POLL_INTERVAL_MS", raising=False)
+        monkeypatch.delenv("RD_POLL_MAX_ATTEMPTS", raising=False)
+
+        config = load_polling_config()
+        window_ms = config["polling_interval_ms"] * config["max_attempts"]
+        # Must not shorten the provider deadline (prior window was 300s).
+        assert window_ms >= 300_000
 
 
 class TestPollingConfigValidOverrides:
@@ -117,8 +126,8 @@ class TestPollingConfigSdkPassThrough:
 
         rd.get_result.assert_called_once_with(
             "r-999",
-            max_attempts=150,
-            polling_interval=2000,
+            max_attempts=300,
+            polling_interval=1000,
         )
 
 
