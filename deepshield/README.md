@@ -15,7 +15,7 @@ the single-port launcher used by `npm start`.
 | `npm run clean` | Remove build output |
 
 `server.js` honors `PORT` (listen port), `BACKEND_PORT` (internal uvicorn
-port, default 8001), and `PYTHON` (default `python3`).
+port, default 8901), and `PYTHON` (default `python3`).
 
 See the [root README](../README.md) for full setup, environment variables,
 architecture, and API docs.

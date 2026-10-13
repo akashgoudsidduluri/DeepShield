@@ -18,11 +18,17 @@ from fastapi import (
     UploadFile,
     File,
     HTTPException,
+    Request,
 )
 
 from fastapi.middleware.cors import CORSMiddleware
 
 from utils.media import get_media_type
+from utils.ratelimit import (
+    client_identity,
+    request_limiter,
+    analysis_slots,
+)
 from services.analyzer import analyze_file
 
 
@@ -83,8 +89,28 @@ def health():
 
 @app.post("/analyze")
 async def analyze(
+    request: Request,
     file: UploadFile = File(...)
 ):
+
+    # Each analysis spends real money at a third-party detector, so throttle
+    # per client before doing any other work.
+    retry_after = request_limiter.check(
+        client_identity(request)
+    )
+
+    if retry_after > 0:
+        wait = int(retry_after) + 1
+
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                "Rate limit reached. DeepShield analysis uses "
+                "paid detection providers, so uploads are "
+                f"throttled. Try again in about {wait} seconds."
+            ),
+            headers={"Retry-After": str(wait)},
+        )
 
     if not file.filename:
         raise HTTPException(
@@ -103,6 +129,19 @@ async def analyze(
                 "Unsupported file type. "
                 "Supported: image, video, audio."
             ),
+        )
+
+    # Bound how many expensive provider calls run at once, so a burst of
+    # uploads cannot exhaust memory or provider concurrency limits.
+    if not analysis_slots.acquire():
+
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                "DeepShield is already analyzing the maximum "
+                "number of files at once. Please retry in a moment."
+            ),
+            headers={"Retry-After": "5"},
         )
 
     start_time = time.time()
@@ -184,6 +223,8 @@ async def analyze(
         )
 
     finally:
+
+        analysis_slots.release()
 
         if (
             temp_path

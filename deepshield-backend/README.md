@@ -23,5 +23,13 @@ Copy these into a local `.env` file (never commit it):
 | `MAX_UPLOAD_MB` | No | Upload size cap in MB (default `100`) |
 | `RD_POLL_MAX_ATTEMPTS` | No | Reality Defender poll attempts (default `150` ≈ 5 min) |
 | `RD_POLL_INTERVAL_MS` | No | Reality Defender poll interval in ms (default `2000`) |
+| `RATE_LIMIT_MAX_REQUESTS` | No | Analyses allowed per client per window (default `30`) |
+| `RATE_LIMIT_WINDOW_SECONDS` | No | Rate-limit window length (default `600`) |
+| `RATE_LIMIT_MAX_CONCURRENT` | No | Analyses allowed to run at once (default `3`) |
+
+`/analyze` returns `429` with a `Retry-After` header when a client exceeds the
+request budget or when too many analyses are already running. Counters are
+in-process, so they are per-worker: a multi-worker or multi-instance deployment
+needs a shared store instead.
 
 The frontend reads its backend URL from `VITE_BACKEND_URL` (see `deepshield/README.md`).

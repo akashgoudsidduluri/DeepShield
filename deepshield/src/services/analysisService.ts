@@ -13,6 +13,22 @@ const BACKEND_URL = BACKEND_BASE.replace(/\/$/, '') + '/analyze';
 // while, but the UI should never hang forever on a dead server).
 const REQUEST_TIMEOUT_MS = 330_000;
 
+// Provider responses are untrusted input: a missing or malformed field must
+// degrade to a sane default instead of rendering "NaN%" in the gauge.
+function toFiniteNumber(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function isUsableScore(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
 function getRecommendation(
   riskScore: number,
   prediction: string
@@ -45,7 +61,7 @@ function getSignalDescription(
   provider: string
 ): string {
   const scoreText =
-  typeof signal.score === 'number'
+  isUsableScore(signal.score)
   ? ` Detection score: ${signal.score.toFixed(1)}%.`
   : '';
 
@@ -131,18 +147,42 @@ export async function analyzeMedia(
   ?.toUpperCase() ||
   'UNKNOWN';
 
+  // Clamp and validate everything before it reaches the UI.
+  const riskScore = clamp(toFiniteNumber(data.risk_score, 0), 0, 100);
+
+  const riskLevel =
+  data.risk_level === 'LOW' ||
+  data.risk_level === 'MEDIUM' ||
+  data.risk_level === 'HIGH'
+  ? data.risk_level
+  : riskScore < 30
+  ? 'LOW'
+  : riskScore < 70
+  ? 'MEDIUM'
+  : 'HIGH';
+
   return {
-    riskScore: Number(data.risk_score),
+    riskScore,
 
-    riskLevel: data.risk_level,
+    riskLevel,
 
-    prediction: data.prediction,
+    prediction:
+    typeof data.prediction === 'string' && data.prediction
+    ? data.prediction
+    : 'INCONCLUSIVE',
 
-    confidence: `${Number(data.confidence).toFixed(1)}%`,
+    confidence: `${clamp(
+      toFiniteNumber(data.confidence, 0),
+      0,
+      100
+    ).toFixed(1)}%`,
 
-    analysisTime: Number(data.analysis_time),
+    analysisTime: toFiniteNumber(data.analysis_time, 0),
 
-    mediaType: data.media_type,
+    mediaType:
+    typeof data.media_type === 'string' && data.media_type
+    ? data.media_type
+    : 'unknown',
 
     format,
 
@@ -153,7 +193,7 @@ export async function analyzeMedia(
           name: signal.name || 'Detection Signal',
 
           value:
-          typeof signal.score === 'number'
+          isUsableScore(signal.score)
         ? `${signal.value || 'UNKNOWN'} • ${signal.score.toFixed(1)}%`
         : signal.value || 'NO SCORE',
 
@@ -165,8 +205,10 @@ export async function analyzeMedia(
       ),
 
       recommendation: getRecommendation(
-        Number(data.risk_score),
-                                        data.prediction
+        riskScore,
+        typeof data.prediction === 'string' && data.prediction
+        ? data.prediction
+        : 'INCONCLUSIVE'
       ),
   };
 }
